@@ -13,12 +13,14 @@ if __name__ == '__main__':
     
     # Подключение к серверу
     client = PacketMimicClient(
-        server_host='172.16.246.180',
+        server_host='localhost',
         server_port=5556,
         password='my_secure_password_123',
-        rules_file=rules_file,  # Файл с правилами фильтрации
+        rules_file=rules_file,      # Файл с правилами фильтрации
         use_tun=use_tun,
-        tun_name='packetmimic0'
+        tun_name='packetmimic0',
+        enable_obfuscation=True,    # Включить обфускацию для обхода DPI
+        obfuscation_method='tls'    # Метод: 'tls' (лучше для YouTube), 'http', 'random'
     )
     
     print("Подключение к PacketMimic VPN Server...")

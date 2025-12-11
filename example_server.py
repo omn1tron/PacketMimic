@@ -14,13 +14,15 @@ if __name__ == '__main__':
     # Запуск сервера на порту 5555 с паролем
     # enable_interceptor=True включает перехват трафика (требует root)
     server = PacketMimicServer(
-        host='172.16.246.180',
+        host='localhost',
         port=5556,
         password='my_secure_password_123',
         enable_interceptor=True,  # Включить перехват трафика
         rules_file=rules_file,     # Файл с правилами фильтрации
         use_tun=use_tun,           # Включить TUN для реального туннеля (Linux)
-        tun_name='packetmimic0'
+        tun_name='packetmimic0',
+        enable_obfuscation=True,   # Включить обфускацию для обхода DPI
+        obfuscation_method='tls'   # Метод: 'tls' (лучше для YouTube), 'http', 'random'
     )
     
     print("Запуск PacketMimic VPN Server...")

@@ -13,6 +13,7 @@ from typing import Dict, Optional, Set
 from .protocol import PacketMimicProtocol, PacketType
 from .traffic_interceptor import TrafficInterceptor, PassiveInterceptor
 from .traffic_filter import TrafficFilter
+from .obfuscator import TrafficObfuscator
 from .tun import TunInterface
 
 
@@ -46,7 +47,8 @@ class PacketMimicServer:
     
     def __init__(self, host: str = '0.0.0.0', port: int = 5555, password: str = 'default_password',
                  enable_interceptor: bool = True, rules_file: Optional[str] = None,
-                 use_tun: bool = False, tun_name: str = 'packetmimic0'):
+                 use_tun: bool = False, tun_name: str = 'packetmimic0',
+                 enable_obfuscation: bool = True, obfuscation_method: str = 'tls'):
         """
         Инициализация сервера
         
@@ -76,6 +78,9 @@ class PacketMimicServer:
         self.passive_interceptor = PassiveInterceptor(self.authorized_ips)
         self.use_tun = use_tun
         self.tun_name = tun_name
+        
+        # Инициализация обфускатора для обхода DPI
+        self.obfuscator = TrafficObfuscator(enabled=enable_obfuscation, method=obfuscation_method)
         
         # Настройка callback для фильтра
         self.traffic_filter.set_alert_callback(self._on_alert)
@@ -160,7 +165,9 @@ class PacketMimicServer:
                 client_socket.close()
                 return
             
-            packet_type, payload = self.protocol.parse_packet(handshake_data)
+            # Деобфускация handshake перед парсингом
+            deobfuscated_handshake = self.obfuscator.deobfuscate_packet(handshake_data)
+            packet_type, payload = self.protocol.parse_packet(deobfuscated_handshake)
             
             if packet_type != PacketType.HANDSHAKE or payload is None:
                 client_socket.close()
@@ -173,12 +180,14 @@ class PacketMimicServer:
             # Проверка аутентификации (упрощенная - по паролю)
             # В реальной системе здесь должна быть проверка сертификатов/ключей
             
-            # Отправка ответа
+            # Отправка ответа с обфускацией
             response = self.protocol.create_handshake_response(True, b'PacketMimicServer')
-            client_socket.sendall(struct.pack('!I', len(response)) + response)
+            obfuscated_response = self.obfuscator.obfuscate_packet(response)
+            client_socket.sendall(struct.pack('!I', len(obfuscated_response)) + obfuscated_response)
             
-            # Создание сессии
+            # Создание сессии (передаем обфускатор для отправки данных)
             session = ClientSession(client_socket, client_id, self.protocol)
+            session.obfuscator = self.obfuscator  # Добавляем обфускатор в сессию
             self.clients[client_id] = session
             
             # Добавление IP клиента в список авторизованных
@@ -245,9 +254,10 @@ class PacketMimicServer:
                 
                 elif packet_type == PacketType.KEEPALIVE:
                     session.last_keepalive = time.time()
-                    # Отправка keepalive обратно
+                    # Отправка keepalive обратно с обфускацией
                     keepalive = self.protocol.create_keepalive()
-                    session.socket.sendall(struct.pack('!I', len(keepalive)) + keepalive)
+                    obfuscated_keepalive = self.obfuscator.obfuscate_packet(keepalive)
+                    session.socket.sendall(struct.pack('!I', len(obfuscated_keepalive)) + obfuscated_keepalive)
                 
                 elif packet_type == PacketType.DISCONNECT:
                     session.connected = False
@@ -319,7 +329,8 @@ class PacketMimicServer:
                 if session.connected:
                     try:
                         keepalive = self.protocol.create_keepalive()
-                        session.socket.sendall(struct.pack('!I', len(keepalive)) + keepalive)
+                        obfuscated_keepalive = self.obfuscator.obfuscate_packet(keepalive)
+                        session.socket.sendall(struct.pack('!I', len(obfuscated_keepalive)) + obfuscated_keepalive)
                     except Exception:
                         session.connected = False
     

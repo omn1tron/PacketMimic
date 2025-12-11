@@ -11,15 +11,16 @@ import struct
 from typing import Optional
 from .protocol import PacketMimicProtocol, PacketType
 from .traffic_filter import TrafficFilter
+from .obfuscator import TrafficObfuscator
 from .tun import TunInterface
-from .traffic_filter import TrafficFilter
 
 
 class PacketMimicClient:
     """Клиент PacketMimic VPN"""
     
     def __init__(self, server_host: str, server_port: int, password: str,
-                 rules_file: Optional[str] = None, use_tun: bool = False, tun_name: str = 'packetmimic0'):
+                 rules_file: Optional[str] = None, use_tun: bool = False, tun_name: str = 'packetmimic0',
+                 enable_obfuscation: bool = True, obfuscation_method: str = 'tls'):
         """
         Инициализация клиента
         
@@ -43,6 +44,9 @@ class PacketMimicClient:
         
         # Инициализация фильтра трафика
         self.traffic_filter = TrafficFilter(rules_file)
+        
+        # Инициализация обфускатора для обхода DPI
+        self.obfuscator = TrafficObfuscator(enabled=enable_obfuscation, method=obfuscation_method)
         self.use_tun = use_tun
         self.tun_name = tun_name
 
@@ -71,9 +75,10 @@ class PacketMimicClient:
             self.socket.connect((self.server_host, self.server_port))
             self.socket.settimeout(10)
             
-            # Отправка handshake
+            # Отправка handshake с обфускацией
             handshake = self.protocol.create_handshake(self.client_id)
-            self.socket.sendall(struct.pack('!I', len(handshake)) + handshake)
+            obfuscated_handshake = self.obfuscator.obfuscate_packet(handshake)
+            self.socket.sendall(struct.pack('!I', len(obfuscated_handshake)) + obfuscated_handshake)
             
             # Получение ответа
             length_data = self.socket.recv(4)
@@ -86,7 +91,9 @@ class PacketMimicClient:
             if len(response_data) != packet_length:
                 return False
             
-            packet_type, payload = self.protocol.parse_packet(response_data)
+            # Деобфускация ответа перед парсингом
+            deobfuscated_response = self.obfuscator.deobfuscate_packet(response_data)
+            packet_type, payload = self.protocol.parse_packet(deobfuscated_response)
             
             if packet_type != PacketType.HANDSHAKE_RESPONSE or payload is None:
                 return False
@@ -200,7 +207,8 @@ class PacketMimicClient:
             if self.connected:
                 try:
                     keepalive = self.protocol.create_keepalive()
-                    self.socket.sendall(struct.pack('!I', len(keepalive)) + keepalive)
+                    obfuscated_keepalive = self.obfuscator.obfuscate_packet(keepalive)
+                    self.socket.sendall(struct.pack('!I', len(obfuscated_keepalive)) + obfuscated_keepalive)
                 except Exception:
                     self.connected = False
     
@@ -244,7 +252,9 @@ class PacketMimicClient:
                     return False  # Блокируем пакет
             
             packet = self.protocol.create_data_packet(ip_packet)
-            self.socket.sendall(struct.pack('!I', len(packet)) + packet)
+            # Обфускация для обхода DPI (маскировка под HTTPS)
+            obfuscated_packet = self.obfuscator.obfuscate_packet(packet)
+            self.socket.sendall(struct.pack('!I', len(obfuscated_packet)) + obfuscated_packet)
             return True
         except Exception as e:
             print(f"[Client] Error sending packet: {e}")
